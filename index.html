@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>成人网站导航 - 前后端分离版</title>
+<style>
+    body {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 16px;
+        font-family: system-ui, -apple-system, sans-serif;
+        line-height: 1.6;
+        background: #f8f9fa;
+    }
+    h1 { text-align: center; margin-bottom: 8px; color: #333; }
+    .table-wrapper {
+        width: 100%;
+        overflow-x: auto;
+        border-radius: 8px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        background: white;
+    }
+    table { width: 100%; border-collapse: collapse; min-width: 1100px; }
+    th, td { padding: 12px 10px; text-align: left; border-bottom: 1px solid #eee; }
+    th { background: #f1f3f5; cursor: pointer; user-select: none; }
+    th:hover { background: #e2e6ea; }
+    tr:hover { background: #f8f9fa; }
+    a { color: #0066cc; text-decoration: none; }
+    .visits { font-weight: bold; color: #d32f2f; }
+    th.sorted-asc::after { content: " ▲"; color: #0066cc; }
+    th.sorted-desc::after { content: " ▼"; color: #0066cc; }
+
+    @media (max-width: 768px) {
+        table, thead, tbody, th, td, tr { display: block; width: 100%; }
+        thead { display: none; }
+        tr { margin-bottom: 16px; background: white; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+        td { display: flex; padding: 12px 16px; border: none; border-bottom: 1px solid #f0f0f0; align-items: center; }
+        td:before { content: attr(data-label); width: 100px; flex-shrink: 0; font-weight: bold; color: #555; }
+        td:nth-child(1):before { content: "网站名称"; }
+        td:nth-child(2):before { content: "访问量"; }
+        td:nth-child(3):before { content: "网址"; }
+        td:nth-child(4):before { content: "描述"; }
+    }
+</style>
+</head>
+<body>
+    <h1>成人网站导航（前后端分离版）</h1>
+    <p style="text-align:center; color:#666;" id="updateTime"></p>
+
+    <div class="table-wrapper">
+        <table id="siteTable">
+            <thead>
+                <tr>
+                    <th onclick="sortTable(0)">网站名称</th>
+                    <th onclick="sortTable(1)">访问量</th>
+                    <th onclick="sortTable(2)">URL</th>
+                    <th onclick="sortTable(3)">描述</th>
+                </tr>
+            </thead>
+            <tbody id="tableBody"></tbody>
+        </table>
+    </div>
+
+<script>
+let sitesData = [];
+let currentSort = { col: 1, dir: 'desc' };
+
+async function loadData() {
+    try {
+        const response = await fetch('sites.json');
+        const data = await response.json();
+        sitesData = data.sites || [];
+        document.getElementById('updateTime').textContent = `最后更新：${data.lastUpdated || '未知'}`;
+        renderTable(sitesData);
+        sortTable(1); // 默认按访问量降序
+    } catch (e) {
+        console.error(e);
+        alert("加载 sites.json 失败，请确保文件与 index.html 在同一目录！");
+    }
+}
+
+function renderTable(data) {
+    const tbody = document.getElementById('tableBody');
+    tbody.innerHTML = '';
+    data.forEach(site => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td data-label="网站名称">${site.name}</td>
+            <td data-label="访问量" class="visits" data-sort="${site.visits}">${site.visitsText}</td>
+            <td data-label="网址"><a href="${site.url}" target="_blank" rel="noopener">${site.url}</a></td>
+            <td data-label="描述">${site.desc}</td>
+        `;
+        tbody.appendChild(tr);
+    });
+}
+
+function sortTable(colIndex) {
+    const isNumeric = colIndex === 1;
+    if (currentSort.col === colIndex) {
+        currentSort.dir = currentSort.dir === 'desc' ? 'asc' : 'desc';
+    } else {
+        currentSort.col = colIndex;
+        currentSort.dir = isNumeric ? 'desc' : 'asc';
+    }
+
+    const sortedData = [...sitesData].sort((a, b) => {
+        let valA = isNumeric ? a.visits : a.name;
+        let valB = isNumeric ? b.visits : b.name;
+        let cmp = isNumeric ? (valA - valB) : String(valA).localeCompare(String(valB), 'zh-CN');
+        return currentSort.dir === 'desc' ? -cmp : cmp;
+    });
+
+    renderTable(sortedData);
+
+    // 更新箭头样式
+    document.querySelectorAll('th').forEach((th, i) => {
+        th.classList.remove('sorted-asc', 'sorted-desc');
+        if (i === colIndex) {
+            th.classList.add(currentSort.dir === 'desc' ? 'sorted-desc' : 'sorted-asc');
+        }
+    });
+}
+
+window.onload = loadData;
+</script>
+</body>
+</html>
