@@ -25,6 +25,7 @@
     th, td { padding: 12px 10px; text-align: left; border-bottom: 1px solid #eee; }
     th { background: #f1f3f5; cursor: pointer; user-select: none; }
     th:hover { background: #e2e6ea; }
+    th:focus-visible { outline: 2px solid #0066cc; outline-offset: -2px; }
     tr:hover { background: #f8f9fa; }
     a { color: #0066cc; text-decoration: none; }
     .visits { font-weight: bold; color: #d32f2f; }
@@ -32,6 +33,7 @@
     th.sorted-desc::after { content: " ▼"; color: #0066cc; }
 
     @media (max-width: 768px) {
+        table { min-width: 0; }
         table, thead, tbody, th, td, tr { display: block; width: 100%; }
         thead { display: none; }
         tr { margin-bottom: 16px; background: white; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
@@ -66,63 +68,135 @@
 let sitesData = [];
 let currentSort = { col: 1, dir: 'desc' };
 
-async function loadData() {
+// 表头索引 → sites.json 里的字段名
+const COLUMNS = ['name', 'visits', 'url', 'desc'];
+
+// 只放行 http / https，避免 javascript: 之类的伪协议
+function safeUrl(raw) {
     try {
-        const response = await fetch('sites.json');
-        const data = await response.json();
-        sitesData = data.sites || [];
-        document.getElementById('updateTime').textContent = `最后更新：${data.lastUpdated || '未知'}`;
-        renderTable(sitesData);
-        sortTable(1); // 默认按访问量降序
+        const u = new URL(String(raw), location.href);
+        return (u.protocol === 'http:' || u.protocol === 'https:') ? u.href : null;
     } catch (e) {
-        console.error(e);
-        alert("加载 sites.json 失败，请确保文件与 index.html 在同一目录！");
+        return null;
     }
+}
+
+function makeCell(label, text, className) {
+    const td = document.createElement('td');
+    td.setAttribute('data-label', label);
+    if (className) { td.className = className; }
+    td.textContent = text == null ? '' : text;
+    return td;
 }
 
 function renderTable(data) {
     const tbody = document.getElementById('tableBody');
-    tbody.innerHTML = '';
-    data.forEach(site => {
+    const frag = document.createDocumentFragment();
+
+    data.forEach(function (site) {
         const tr = document.createElement('tr');
-        tr.innerHTML = `
-            <td data-label="网站名称">${site.name}</td>
-            <td data-label="访问量" class="visits" data-sort="${site.visits}">${site.visitsText}</td>
-            <td data-label="网址"><a href="${site.url}" target="_blank" rel="noopener">${site.url}</a></td>
-            <td data-label="描述">${site.desc}</td>
-        `;
-        tbody.appendChild(tr);
+
+        const tdUrl = document.createElement('td');
+        tdUrl.setAttribute('data-label', '网址');
+        const url = safeUrl(site.url);
+        if (url) {
+            const a = document.createElement('a');
+            a.href = url;
+            a.target = '_blank';
+            a.rel = 'noopener noreferrer';
+            a.textContent = site.url;
+            tdUrl.appendChild(a);
+        } else {
+            tdUrl.textContent = site.url || '(无效链接)';
+        }
+
+        tr.appendChild(makeCell('网站名称', site.name));
+        tr.appendChild(makeCell('访问量', site.visitsText, 'visits'));
+        tr.appendChild(tdUrl);
+        tr.appendChild(makeCell('描述', site.desc));
+        frag.appendChild(tr);
     });
+
+    tbody.innerHTML = '';
+    tbody.appendChild(frag);
 }
 
-function sortTable(colIndex) {
-    const isNumeric = colIndex === 1;
-    if (currentSort.col === colIndex) {
-        currentSort.dir = currentSort.dir === 'desc' ? 'asc' : 'desc';
-    } else {
-        currentSort.col = colIndex;
-        currentSort.dir = isNumeric ? 'desc' : 'asc';
-    }
-
-    const sortedData = [...sitesData].sort((a, b) => {
-        let valA = isNumeric ? a.visits : a.name;
-        let valB = isNumeric ? b.visits : b.name;
-        let cmp = isNumeric ? (valA - valB) : String(valA).localeCompare(String(valB), 'zh-CN');
-        return currentSort.dir === 'desc' ? -cmp : cmp;
-    });
-
-    renderTable(sortedData);
-
-    // 更新箭头样式
-    document.querySelectorAll('th').forEach((th, i) => {
-        th.classList.remove('sorted-asc', 'sorted-desc');
+function updateArrows(colIndex, dir) {
+    document.querySelectorAll('th').forEach(function (th, i) {
+        th.classList.toggle('sorted-asc', i === colIndex && dir === 'asc');
+        th.classList.toggle('sorted-desc', i === colIndex && dir === 'desc');
         if (i === colIndex) {
-            th.classList.add(currentSort.dir === 'desc' ? 'sorted-desc' : 'sorted-asc');
+            th.setAttribute('aria-sort', dir === 'asc' ? 'ascending' : 'descending');
+        } else {
+            th.removeAttribute('aria-sort');
         }
     });
 }
 
-window.onload = loadData;
+// 真正执行排序（不翻转方向，方向由调用方给）
+function applySort(colIndex, dir) {
+    const key = COLUMNS[colIndex];
+    const numeric = key === 'visits';
+    currentSort = { col: colIndex, dir: dir };
+
+    const sorted = sitesData.slice().sort(function (a, b) {
+        let cmp;
+        if (numeric) {
+            cmp = Number(a[key]) - Number(b[key]);
+        } else {
+            const va = a[key] == null ? '' : String(a[key]);
+            const vb = b[key] == null ? '' : String(b[key]);
+            cmp = va.localeCompare(vb, 'zh-CN');
+        }
+        return dir === 'desc' ? -cmp : cmp;
+    });
+
+    renderTable(sorted);
+    updateArrows(colIndex, dir);
+}
+
+// 点击表头：同列切换方向，换列按该列的数据给默认方向
+function sortTable(colIndex) {
+    let dir;
+    if (currentSort.col === colIndex) {
+        dir = currentSort.dir === 'desc' ? 'asc' : 'desc';
+    } else {
+        dir = colIndex === 1 ? 'desc' : 'asc';
+    }
+    applySort(colIndex, dir);
+}
+
+function enableKeyboardSorting() {
+    document.querySelectorAll('th').forEach(function (th, i) {
+        th.tabIndex = 0;
+        th.setAttribute('role', 'button');
+        th.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                sortTable(i);
+            }
+        });
+    });
+}
+
+async function loadData() {
+    const status = document.getElementById('updateTime');
+    try {
+        const response = await fetch('sites.json');
+        if (!response.ok) { throw new Error('HTTP ' + response.status); }
+        const data = await response.json();
+        sitesData = Array.isArray(data.sites) ? data.sites : [];
+        status.textContent = '最后更新：' + (data.lastUpdated || '未知');
+        applySort(1, 'desc');   // 首屏：访问量从高到低
+    } catch (e) {
+        console.error('加载 sites.json 失败：', e);
+        status.textContent = '数据加载失败（' + e.message + '），请确认 sites.json 与 index.html 在同一目录，且通过网页服务器打开。';
+        status.style.color = '#d32f2f';
+    }
+}
+
+enableKeyboardSorting();
+window.addEventListener('load', loadData);
 </script>
 </body>
 </html>
